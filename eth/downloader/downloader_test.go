@@ -75,7 +75,7 @@ func newTester() *downloadTester {
 		chain:   chain,
 		peers:   make(map[string]*downloadTesterPeer),
 	}
-	tester.downloader = New(0, db, trie.NewSyncBloom(1, db), new(event.TypeMux), tester.chain, nil, tester.dropPeer)
+	tester.downloader = New(0, db, new(event.TypeMux), tester.chain, nil, tester.dropPeer)
 	return tester
 }
 
@@ -154,12 +154,24 @@ func (dlp *downloadTesterPeer) Head() (common.Hash, *big.Int) {
 	return head.Hash(), dlp.chain.GetTd(head.Hash(), head.NumberU64())
 }
 
+func unmarshalRlpHeaders(rlpdata []rlp.RawValue) []*types.Header {
+	var headers = make([]*types.Header, len(rlpdata))
+	for i, data := range rlpdata {
+		var h types.Header
+		if err := rlp.DecodeBytes(data, &h); err != nil {
+			panic(err)
+		}
+		headers[i] = &h
+	}
+	return headers
+}
+
 // RequestHeadersByHash constructs a GetBlockHeaders function based on a hashed
 // origin; associated with a particular peer in the download tester. The returned
 // function can be used to retrieve batches of headers from the particular peer.
 func (dlp *downloadTesterPeer) RequestHeadersByHash(origin common.Hash, amount int, skip int, reverse bool, sink chan *eth.Response) (*eth.Request, error) {
 	// Service the header query via the live handler code
-	headers := eth.ServiceGetBlockHeadersQuery(dlp.chain, &eth.GetBlockHeadersPacket{
+	rlpHeaders := eth.ServiceGetBlockHeadersQuery(dlp.chain, &eth.GetBlockHeadersPacket{
 		Origin: eth.HashOrNumber{
 			Hash: origin,
 		},
@@ -167,7 +179,7 @@ func (dlp *downloadTesterPeer) RequestHeadersByHash(origin common.Hash, amount i
 		Skip:    uint64(skip),
 		Reverse: reverse,
 	}, nil)
-
+	headers := unmarshalRlpHeaders(rlpHeaders)
 	// If a malicious peer is simulated withholding headers, delete them
 	for hash := range dlp.withholdHeaders {
 		for i, header := range headers {
@@ -177,6 +189,10 @@ func (dlp *downloadTesterPeer) RequestHeadersByHash(origin common.Hash, amount i
 			}
 		}
 	}
+	hashes := make([]common.Hash, len(headers))
+	for i, header := range headers {
+		hashes[i] = header.Hash()
+	}
 	// Deliver the headers to the downloader
 	req := &eth.Request{
 		Peer: dlp.id,
@@ -184,6 +200,7 @@ func (dlp *downloadTesterPeer) RequestHeadersByHash(origin common.Hash, amount i
 	res := &eth.Response{
 		Req:  req,
 		Res:  (*eth.BlockHeadersPacket)(&headers),
+		Meta: hashes,
 		Time: 1,
 		Done: make(chan error, 1), // Ignore the returned status
 	}
@@ -198,7 +215,7 @@ func (dlp *downloadTesterPeer) RequestHeadersByHash(origin common.Hash, amount i
 // function can be used to retrieve batches of headers from the particular peer.
 func (dlp *downloadTesterPeer) RequestHeadersByNumber(origin uint64, amount int, skip int, reverse bool, sink chan *eth.Response) (*eth.Request, error) {
 	// Service the header query via the live handler code
-	headers := eth.ServiceGetBlockHeadersQuery(dlp.chain, &eth.GetBlockHeadersPacket{
+	rlpHeaders := eth.ServiceGetBlockHeadersQuery(dlp.chain, &eth.GetBlockHeadersPacket{
 		Origin: eth.HashOrNumber{
 			Number: origin,
 		},
@@ -206,7 +223,7 @@ func (dlp *downloadTesterPeer) RequestHeadersByNumber(origin uint64, amount int,
 		Skip:    uint64(skip),
 		Reverse: reverse,
 	}, nil)
-
+	headers := unmarshalRlpHeaders(rlpHeaders)
 	// If a malicious peer is simulated withholding headers, delete them
 	for hash := range dlp.withholdHeaders {
 		for i, header := range headers {
@@ -216,6 +233,10 @@ func (dlp *downloadTesterPeer) RequestHeadersByNumber(origin uint64, amount int,
 			}
 		}
 	}
+	hashes := make([]common.Hash, len(headers))
+	for i, header := range headers {
+		hashes[i] = header.Hash()
+	}
 	// Deliver the headers to the downloader
 	req := &eth.Request{
 		Peer: dlp.id,
@@ -223,6 +244,7 @@ func (dlp *downloadTesterPeer) RequestHeadersByNumber(origin uint64, amount int,
 	res := &eth.Response{
 		Req:  req,
 		Res:  (*eth.BlockHeadersPacket)(&headers),
+		Meta: hashes,
 		Time: 1,
 		Done: make(chan error, 1), // Ignore the returned status
 	}
@@ -243,12 +265,22 @@ func (dlp *downloadTesterPeer) RequestBodies(hashes []common.Hash, sink chan *et
 		bodies[i] = new(eth.BlockBody)
 		rlp.DecodeBytes(blob, bodies[i])
 	}
+	var (
+		txsHashes   = make([]common.Hash, len(bodies))
+		uncleHashes = make([]common.Hash, len(bodies))
+	)
+	hasher := trie.NewStackTrie(nil)
+	for i, body := range bodies {
+		txsHashes[i] = types.DeriveSha(types.Transactions(body.Transactions), hasher)
+		uncleHashes[i] = types.CalcUncleHash(body.Uncles)
+	}
 	req := &eth.Request{
 		Peer: dlp.id,
 	}
 	res := &eth.Response{
 		Req:  req,
 		Res:  (*eth.BlockBodiesPacket)(&bodies),
+		Meta: [][]common.Hash{txsHashes, uncleHashes},
 		Time: 1,
 		Done: make(chan error, 1), // Ignore the returned status
 	}
@@ -268,12 +300,18 @@ func (dlp *downloadTesterPeer) RequestReceipts(hashes []common.Hash, sink chan *
 	for i, blob := range blobs {
 		rlp.DecodeBytes(blob, &receipts[i])
 	}
+	hasher := trie.NewStackTrie(nil)
+	hashes = make([]common.Hash, len(receipts))
+	for i, receipt := range receipts {
+		hashes[i] = types.DeriveSha(types.Receipts(receipt), hasher)
+	}
 	req := &eth.Request{
 		Peer: dlp.id,
 	}
 	res := &eth.Response{
 		Req:  req,
 		Res:  (*eth.ReceiptsPacket)(&receipts),
+		Meta: hashes,
 		Time: 1,
 		Done: make(chan error, 1), // Ignore the returned status
 	}
