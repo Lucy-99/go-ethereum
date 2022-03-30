@@ -83,8 +83,8 @@ type NumberHash struct {
 	Hash   common.Hash
 }
 
-// ReadAllHashes retrieves all the hashes assigned to blocks at a certain heights,
-// both canonical and reorged forks included.
+// ReadAllHashesInRange retrieves all the hashes assigned to blocks at certain
+// heights, both canonical and reorged forks included.
 // This method considers both limits to be _inclusive_.
 func ReadAllHashesInRange(db ethdb.Iteratee, first, last uint64) []*NumberHash {
 	var (
@@ -447,8 +447,11 @@ func ReadCanonicalBodyRLP(db ethdb.Reader, number uint64) rlp.RawValue {
 		if len(data) > 0 {
 			return nil
 		}
-		// Get it by hash from leveldb
-		data, _ = db.Get(blockBodyKey(number, ReadCanonicalHash(db, number)))
+		// Block is not in ancients, read from leveldb by hash and number.
+		// Note: ReadCanonicalHash cannot be used here because it also
+		// calls ReadAncients internally.
+		hash, _ := db.Get(headerHashKey(number))
+		data, _ = db.Get(blockBodyKey(number, common.BytesToHash(hash)))
 		return nil
 	})
 	return data
@@ -714,7 +717,7 @@ func ReadLogs(db ethdb.Reader, hash common.Hash, number uint64, config *params.C
 		if logs := readLegacyLogs(db, hash, number, config); logs != nil {
 			return logs
 		}
-		log.Error("Invalid receipt array RLP", "hash", "err", err)
+		log.Error("Invalid receipt array RLP", "hash", hash, "err", err)
 		return nil
 	}
 
@@ -773,7 +776,7 @@ func WriteBlock(db ethdb.KeyValueWriter, block *types.Block) {
 	WriteHeader(db, block.Header())
 }
 
-// WriteAncientBlock writes entire block data into ancient store and returns the total written size.
+// WriteAncientBlocks writes entire block data into ancient store and returns the total written size.
 func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts []types.Receipts, td *big.Int) (int64, error) {
 	var (
 		tdSum      = new(big.Int).Set(td)

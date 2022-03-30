@@ -52,12 +52,28 @@ Going through all the possible command line flags is out of scope here (please c
 but we've enumerated a few common parameter combos to get you up to speed quickly
 on how you can run your own `geth` instance.
 
+### Hardware Requirements
+
+Minimum:
+
+* CPU with 2+ cores
+* 4GB RAM
+* 500GB free storage space to sync the Mainnet
+* 8 MBit/sec download Internet service
+
+Recommended:
+
+* Fast CPU with 4+ cores
+* 16GB+ RAM
+* High Performance SSD with at least 500GB free space
+* 25+ MBit/sec download Internet service
+
 ### Full node on the main Ethereum network
 
 By far the most common scenario is people wanting to simply interact with the Ethereum
 network: create accounts; transfer funds; deploy and interact with contracts. For this
 particular use-case the user doesn't care about years-old historical data, so we can
-fast-sync quickly to the current state of the network. To do so:
+sync quickly to the current state of the network. To do so:
 
 ```shell
 $ geth console
@@ -159,13 +175,13 @@ docker run -d --name ethereum-node -v /Users/alice/ethereum:/root \
            ethereum/client-go
 ```
 
-This will start `geth` in fast-sync mode with a DB memory allowance of 1GB just as the
+This will start `geth` in snap-sync mode with a DB memory allowance of 1GB just as the
 above command does.  It will also create a persistent volume in your home directory for
 saving your blockchain as well as map the default ports. There is also an `alpine` tag
 available for a slim version of the image.
 
 Do not forget `--http.addr 0.0.0.0`, if you want to access RPC from other containers
-and/or hosts. By default, `geth` binds to the local interface and RPC endpoints is not
+and/or hosts. By default, `geth` binds to the local interface and RPC endpoints are not
 accessible from the outside.
 
 ### Programmatically interfacing `geth` nodes
