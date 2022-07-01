@@ -835,6 +835,12 @@ var (
 		Usage:    "Sets DNS discovery entry points (use \"\" to disable DNS)",
 		Category: flags.NetworkingCategory,
 	}
+	DiscoveryPortFlag = &cli.IntFlag{
+		Name:     "discovery.port",
+		Usage:    "Use a custom UDP port for P2P discovery",
+		Value:    30303,
+		Category: flags.NetworkingCategory,
+	}
 
 	// Console
 	JSpathFlag = &flags.DirectoryFlag{
@@ -1075,8 +1081,11 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		urls = params.GoerliBootnodes
 	case ctx.Bool(KilnFlag.Name):
 		urls = params.KilnBootnodes
-	case cfg.BootstrapNodes != nil:
-		return // already set, don't apply defaults.
+	}
+
+	// don't apply defaults if BootstrapNodes is already set
+	if cfg.BootstrapNodes != nil {
+		return
 	}
 
 	cfg.BootstrapNodes = make([]*enode.Node, 0, len(urls))
@@ -1116,11 +1125,14 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	}
 }
 
-// setListenAddress creates a TCP listening address string from set command
-// line flags.
+// setListenAddress creates TCP/UDP listening address strings from set command
+// line flags
 func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	if ctx.IsSet(ListenPortFlag.Name) {
 		cfg.ListenAddr = fmt.Sprintf(":%d", ctx.Int(ListenPortFlag.Name))
+	}
+	if ctx.IsSet(DiscoveryPortFlag.Name) {
+		cfg.DiscAddr = fmt.Sprintf(":%d", ctx.Int(DiscoveryPortFlag.Name))
 	}
 }
 
