@@ -77,17 +77,16 @@ type txPool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	Database   ethdb.Database            // Database for direct sync insertions
-	Chain      *core.BlockChain          // Blockchain to serve data from
-	TxPool     txPool                    // Transaction pool to propagate from
-	Merger     *consensus.Merger         // The manager for eth1/2 transition
-	Network    uint64                    // Network identifier to adfvertise
-	Sync       downloader.SyncMode       // Whether to snap or full sync
-	BloomCache uint64                    // Megabytes to alloc for snap sync bloom
-	EventMux   *event.TypeMux            // Legacy event mux, deprecate for `feed`
-	Checkpoint *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
-
-	PeerRequiredBlocks map[uint64]common.Hash // Hard coded map of required block hashes for sync challenges
+	Database       ethdb.Database            // Database for direct sync insertions
+	Chain          *core.BlockChain          // Blockchain to serve data from
+	TxPool         txPool                    // Transaction pool to propagate from
+	Merger         *consensus.Merger         // The manager for eth1/2 transition
+	Network        uint64                    // Network identifier to adfvertise
+	Sync           downloader.SyncMode       // Whether to snap or full sync
+	BloomCache     uint64                    // Megabytes to alloc for snap sync bloom
+	EventMux       *event.TypeMux            // Legacy event mux, deprecate for `feed`
+	Checkpoint     *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
+	RequiredBlocks map[uint64]common.Hash    // Hard coded map of required block hashes for sync challenges
 }
 
 type handler struct {
@@ -116,7 +115,7 @@ type handler struct {
 	txsSub        event.Subscription
 	minedBlockSub *event.TypeMuxSubscription
 
-	peerRequiredBlocks map[uint64]common.Hash
+	requiredBlocks map[uint64]common.Hash
 
 	// channels for fetcher, syncer, txsyncLoop
 	quitSync chan struct{}
@@ -133,16 +132,16 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
 	}
 	h := &handler{
-		networkID:          config.Network,
-		forkFilter:         forkid.NewFilter(config.Chain),
-		eventMux:           config.EventMux,
-		database:           config.Database,
-		txpool:             config.TxPool,
-		chain:              config.Chain,
-		peers:              newPeerSet(),
-		merger:             config.Merger,
-		peerRequiredBlocks: config.PeerRequiredBlocks,
-		quitSync:           make(chan struct{}),
+		networkID:      config.Network,
+		forkFilter:     forkid.NewFilter(config.Chain),
+		eventMux:       config.EventMux,
+		database:       config.Database,
+		txpool:         config.TxPool,
+		chain:          config.Chain,
+		peers:          newPeerSet(),
+		merger:         config.Merger,
+		requiredBlocks: config.RequiredBlocks,
+		quitSync:       make(chan struct{}),
 	}
 	if config.Sync == downloader.FullSync {
 		// The database seems empty as the current block is the genesis. Yet the snap
@@ -250,7 +249,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		// out a way yet where nodes can decide unilaterally whether the network is new
 		// or not. This should be fixed if we figure out a solution.
 		if atomic.LoadUint32(&h.snapSync) == 1 {
-			log.Warn("Fast syncing, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
+			log.Warn("Snap syncing, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
 			return 0, nil
 		}
 		if h.merger.TDDReached() {
@@ -297,7 +296,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 }
 
 // runEthPeer registers an eth peer into the joint eth/snap peerset, adds it to
-// various subsistems and starts handling messages.
+// various subsystems and starts handling messages.
 func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	// If the peer has a `snap` extension, wait for it to connect so we can have
 	// a uniform initialization/teardown mechanism
@@ -425,7 +424,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		}()
 	}
 	// If we have any explicit peer required block hashes, request them
-	for number := range h.peerRequiredBlocks {
+	for number, hash := range h.requiredBlocks {
 		resCh := make(chan *eth.Response)
 		if _, err := peer.RequestHeadersByNumber(number, 1, 0, false, resCh); err != nil {
 			return err
